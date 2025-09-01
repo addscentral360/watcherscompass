@@ -1,0 +1,1425 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Movie Finder – Filter by Genre, Year, Streaming Service</title>
+  <meta name="description" content="Find movies by genre, year range, country availability, and streaming service. Simple fast filters. TMDB powered." />
+  <style>
+    /* --- Globals --- */
+html, body { height: 100%; }
+
+.page {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) 260px;
+  gap: 16px;
+  align-items: start;
+  padding: 16px;
+}
+
+@media (max-width: 1200px) {
+  .page { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 12px; }
+  .rail { display: none; }
+  /* .main { max-width: 820px; } /* keep if you want the tighter main */
+}
+
+/* --- Fix main column so it can actually shrink inside the 3-col layout --- */
+.main{
+  width: 100%;
+  margin: 0;
+  min-width: 0;            /* key: allow shrinking; prevents right overflow */
+  justify-self: stretch;    /* extra safety */
+  max-width: none;          /* extra safety */
+}
+
+.grid {
+  display: grid;
+  gap: var(--gridGap);
+ grid-template-columns: repeat(auto-fit, minmax(var(--cardMin), 1fr));
+  align-items: stretch;
+}
+
+/* Phones fall to single column automatically, but if you want a hard 2→1 step: */
+@media (max-width: 700px){
+  .grid{ grid-template-columns: 1fr; }
+}
+
+/* Let panel content breathe if it needs to paint to the edge (slider thumbs, etc) */
+.panel{ overflow: visible; }
+
+
+:root {
+  /* theme (keep yours as-is if already set) */
+  --bg: #0b0e13;
+  --panel: #121722;
+  --text: #c8ffd6;
+  --muted: #7beaa1;
+  --border: #1b2333;
+
+/* make posters bigger at their smallest */
+  --posterW: clamp(84px, 6vw, 110px);
+  --posterMaxH: calc(var(--posterW) * 1.4); /* ~2:3 ratio */
+
+  /* card/grid sizing: card min depends on poster width */
+  --gridGap: 12px;
+  --cardTextMin: 120px;                     /* room for title/meta/buttons */
+  --cardMin: calc(var(--posterW) + var(--cardTextMin));
+}
+
+ body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  /* overflow-x: hidden;  ❌ remove this */
+}
+
+  .rail {
+    position: sticky; top:16px; height: calc(100vh - 32px);
+    border:1px dashed var(--border); border-radius:10px;
+    display:flex; align-items:center; justify-content:center;
+    color: var(--muted); font-size:14px; text-align:center;
+  }
+
+  header { margin: 12px 0 8px; }
+  h1 { margin:0 0 8px; }
+  p.sub { margin:0 0 12px; color: var(--muted); }
+
+  label { font-size:14px; }
+
+  input, select, button {
+    background:#0f1420; color:var(--text); border:1px solid var(--border);
+    border-radius:8px; padding:6px 8px;
+  }
+  button { cursor:pointer; }
+
+  .ads { border:1px dashed var(--border); padding:12px; text-align:center; color:var(--muted); border-radius:10px; }
+
+.card {
+  background: #0f1420;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;   /* vertical layout always */
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+}
+
+.card img {
+  width: var(--posterW);
+  height: auto;
+  max-height: var(--posterMaxH);
+  flex-shrink: 0;
+  border-radius: 8px;
+  object-fit: contain;
+  margin-bottom: 6px;
+}
+
+.card > div {
+  width: 100%;
+}
+
+.card .title { margin: 0; line-height: 1.2; font-size: 0.95rem; }
+.card .meta  { color: var(--muted); font-size: 0.85rem; line-height: 1.2; }
+
+
+/* Pretty synopsis button */
+.synopsis-btn {
+  background: #0f1420;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  color: var(--text);
+  cursor: pointer;
+  width: fit-content;
+}
+.synopsis-btn:hover { border-color: #39ff14; }
+
+small { color: var(--muted); }   /* <- ONLY color here, nothing else */
+
+/* --- Modal Popup --- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  display: none;              /* hidden by default */
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  max-width: 600px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  position: relative;
+  color: var(--text);
+}
+.modal h3 { margin-top: 0; }
+.modal .close-btn {
+  position: absolute;
+  top: 8px; right: 12px;
+  font-size: 1.4rem;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.btn {
+  background: #0f1420;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  color: var(--text);
+  cursor: pointer;
+  width: fit-content;
+}
+
+.btn:hover { border-color: #39ff14; }
+
+/* Modal video */
+.video-wrap {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+.video-wrap iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+.range-track{
+  position:absolute;
+  /* inset the track by half a thumb on both sides */
+  left: calc(var(--thumbW) / 2);
+  right: calc(var(--thumbW) / 2);
+  top:15px;
+  height:6px;
+  border-radius:4px;
+  background:#1b2333;
+}
+
+.range-fill{
+  position:absolute; top:0; height:6px;
+  left:0; width:0;
+  background:#39ff14;
+  border-radius:4px;
+}
+
+
+/* Two overlapped range inputs (absolute over the track) */
+.range-wrap input[type="range"]{
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  margin: 0;
+  background: transparent;
+  border: none;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  pointer-events: none;       /* track is inert; thumbs handle events */
+}
+
+/* Thumbs use the same var so math stays correct */
+.range-wrap input[type="range"]::-webkit-slider-thumb{
+  -webkit-appearance: none;
+  pointer-events: auto;
+  width: var(--thumbW);
+  height: var(--thumbW);
+  border-radius: 50%;
+  background: #39ff14;
+  border: 2px solid var(--border);
+  margin-top: 6px;            /* vertical nudge to center on 4px rail */
+  cursor: pointer;
+}
+.range-wrap input[type="range"]::-moz-range-thumb{
+  pointer-events: auto;
+  width: var(--thumbW);
+  height: var(--thumbW);
+  border-radius: 50%;
+  background: #39ff14;
+  border: 2px solid var(--border);
+  cursor: pointer;
+}
+
+/* Hide default tracks */
+.range-wrap input[type="range"]::-webkit-slider-runnable-track{ height: 0; }
+.range-wrap input[type="range"]::-moz-range-track{ height: 0; }
+
+
+/* Primary colorful style */
+.btn-primary {
+  background: linear-gradient(135deg, #39ff14, #00c3ff);
+  color: #111;
+}
+
+.btn-primary:hover {
+  background: linear-gradient(135deg, #2ecc71, #3498db);
+  transform: translateY(-2px);
+}
+
+
+/* at the bottom of style.css */
+#loadMoreBtn {
+  display:block;
+  margin:20px auto;
+  padding:14px 28px;
+  font-size:16px;
+  font-weight:600;
+  background: linear-gradient(135deg, #39ff14, #1e90ff);
+  color:#fff;
+  border:none;
+  border-radius:12px;
+  cursor:pointer;
+  transition:transform .15s ease, opacity .15s ease;
+}
+
+#loadMoreBtn:hover {
+  transform:scale(1.05);
+  opacity:0.9;
+}
+#loadMoreBtn:disabled {
+  background:#555;
+  cursor:not-allowed;
+  opacity:0.6;
+}
+
+#ad-slot-below-loadmore {
+  margin: 30px auto;
+  text-align: center;
+  min-height: 90px;  /* reserve space even if ad loads late */
+  border: 1px dashed #999; /* optional: visible placeholder */
+}
+
+/* center results grid in main */
+.results{ margin-top:16px; }
+
+/* ---- spacing & type scale ---- */
+:root{
+  --space-1: 6px;
+  --space-2: 10px;
+  --space-3: 14px;
+  --space-4: 20px;
+  --radius: 12px;
+  --thumbW: 18px; /* must match the slider thumb size */
+  --genreRowH: 34px;         /* one genre row height (label + checkbox) */
+  --genreGapV: 8px;          /* vertical gap between rows in the grid */
+  --genresPad: 8px;          /* .genres-box padding (already 8px in your CSS) */
+--subScrollerH: clamp(300px, 42vh, 480px); /* was the calc(...) */
+}
+
+/* A faint divider below the top filters */
+.panel::after{
+  content:"";
+  display:block;
+  height:1px;
+  background: linear-gradient(90deg, transparent, var(--border), transparent);
+  margin: 8px 0 6px;    /* was larger; tighten it */
+}
+
+/* Results grid centered & tidy titles */
+.card .title{
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+}
+.card{ transition: transform .12s ease, border-color .12s ease; }
+.card:hover{ transform: translateY(-2px); border-color:#39ff14; }
+
+/* Panel + header breathing room */
+header { margin: 6px 0 6px; }
+.top-ad { margin-bottom: 8px; }
+
+/* --- Card action buttons: segmented group --- */
+.card .btn-group{
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0f1420;
+}
+
+.card .btn-ghost{
+  border: 0;
+  padding: 6px 12px;
+  font-size: .95rem;
+  color: var(--text);
+  line-height: 1;
+  background: transparent;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+
+.card .btn-ghost + .btn-ghost{
+  border-left: 1px solid var(--border);
+}
+
+/* Hover/active */
+.card .btn-ghost:hover{
+  background: rgba(57, 255, 20, 0.07);
+  color: #cfffde;
+}
+.card .btn-ghost:active{
+  background: rgba(57, 255, 20, 0.12);
+}
+
+/* Optional little icons */
+.btn--syn::before{
+  content: "📜";
+  margin-right: 6px;
+}
+.btn--trailer::before{
+  content: "▶";
+  margin-right: 6px;
+  font-weight: 700;
+}
+/* ===== Fix subfilters layout + equal scrollers (final overrides) ===== */
+
+/* make the width cap apply ONLY to the results grid */
+#results.grid { max-width: none; margin: 0 auto; }
+
+/* Make the columns actually stretch to the tallest one */
+.subfilters{
+  display:grid;
+  width: 100%;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: 12px 20px;
+  align-items: stretch;   /* was start */
+  justify-items: stretch;
+}
+
+/* Let children actually use their column width */
+.subfilters > *{ min-width: 0; }
+
+/* Providers column stays simple flex so the box is the height driver */
+.providers-block{
+  display:flex;
+    gap: 8px;
+  margin-top: 6px;
+  flex-direction:column;
+  min-width:0;
+}
+
+/* Right column = 3-row grid: head / scroller / actions */
+.genres-block{
+  display:grid;
+  grid-template-rows: auto 1fr auto;
+  row-gap: 8px;
+  min-width:0;
+  width: 100%; 
+  justify-self: stretch;
+}
+
+
+/* Both scrollers use the same exact height and scroll */
+.providers-box,
+.genres-box{
+  max-width: none !important;
+  width:100%;
+  min-width:0;
+  box-sizing:border-box;
+  height: var(--subScrollerH);   /* <- the magic */
+  overflow:auto;
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding-right: calc(var(--genresPad) + 6px);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Genres grid: keep 3 columns, but no fixed row height */
+#genres{
+  max-width: none !important;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 16px;
+    width: 100%; 
+  min-width: 0;
+  align-items: start;
+}
+
+/* Make each label wrap naturally and occupy its column’s width */
+#genres label{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.25;
+  min-width: 0;        /* critical so text can shrink to column width */
+  white-space: normal; /* allow wrapping */
+  overflow: visible;   /* no clipping */
+  margin: 0 !important;         /* overrides lbl.style.margin = '4px 8px' */
+}
+
+
+/* Tablet => 2 cols; Phone => 1 col (height still based on 3 rows) */
+@media (max-width: 1000px){ #genres{ grid-template-columns: repeat(2, minmax(0,1fr)); } }
+@media (max-width: 700px){  #genres{ grid-template-columns: 1fr; } }
+
+
+/* Actions live under the scroller (row 3) */
+.genre-actions{
+  display:flex;
+  gap:8px;
+  align-items:center;
+}
+
+/* Since genre-actions moved out of the shared actions row,
+   make that row just hold Monetization cleanly */
+.subfilters-actions{
+  grid-column: 1 / -1;
+  display:grid;
+  grid-template-columns: 1fr;   /* only Monetization remains here */
+  gap: 16px;
+  margin-top: 12px;
+}
+
+/* Monetization forced left, full width inside its half */
+.subfilters-actions .monet-block {
+  grid-column: 1;
+}
+
+/* Genre bulk buttons forced right, aligned to top left of their half */
+.subfilters-actions .genre-actions {
+  grid-column: 2;
+  justify-self: start;
+  display: flex;
+  gap: 8px;
+}
+
+
+/* Search row = full width under the actions row */
+.search-row{
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+/* Narrow screens — stack */
+@media (max-width: 900px){
+  .subfilters{ grid-template-columns: 1fr; }
+  .subfilters-actions{ grid-template-columns: 1fr; }
+}
+
+.btn-xl{
+  padding: 14px 36px;       /* was 12px 28px */
+  font-size: 1.20rem;       /* was 1.05rem */
+  border-radius: 999px;
+  box-shadow: 0 2px 0 rgba(0,0,0,.25);
+  min-width: 180px;         /* forces a wider pill */
+}
+
+/* On phones: let it fill the row */
+@media (max-width: 720px){
+  .search-row .btn{ width: 100%; }
+}
+
+/* stack everything on narrow screens */
+@media (max-width: 900px){
+  .subfilters{ grid-template-columns: 1fr; }
+  .subfilters-actions{ grid-template-columns: 1fr; } /* buttons over monet */
+}
+
+/* Erotic pill – pink gradient, rounded, compact */
+.erotic-tog {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 105, 180, 0.35);
+  background: linear-gradient(135deg, rgba(255,105,180,0.15), rgba(255,20,147,0.10));
+  color: #ffb4d6;
+  box-shadow: 0 0 0 1px rgba(255,105,180,0.05) inset;
+}
+
+/* Pink checkbox accent */
+.erotic-tog input[type="checkbox"] {
+  accent-color: #ff4fa3; /* modern browsers */
+}
+
+/* Hover focus */
+.erotic-tog:hover {
+  border-color: rgba(255, 105, 180, 0.55);
+  box-shadow: 0 0 0 1px rgba(255,105,180,0.15) inset;
+}
+
+
+/* Keep it single-column on narrow screens */
+@media (max-width: 900px){
+  .subfilters{ grid-template-columns: 1fr; }
+}
+
+/* (nice-to-have) tighten heading spacing */
+.providers-block h3,
+.genres-block h3 { margin: 0 0 6px; }
+
+.filters{
+  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  display: grid;
+  width: 100%;
+  box-sizing: border-box;
+  gap: 12px 16px;
+  align-items: start;
+  margin-bottom: 22px;
+
+  grid-template-columns:
+    minmax(0,100px)   /* Region */
+    minmax(0,100px)   /* Min votes */
+    minmax(0,130px)   /* Sort */
+    minmax(0,1fr);    /* Years IO / Slider */
+ 
+  grid-template-areas:
+    "region votes sort yearsIO"
+    "monet  monet monet yearsSL";
+}
+
+/* Map fields to the grid areas */
+.field--region       { grid-area: region; }
+.field--votes        { margin-right: 6px; grid-area: votes;  }
+.sort-field          { margin-left: 6px; grid-area: sort;   }
+.field--years-io     { grid-area: yearsIO;}
+.field--monet        { align-self: end; grid-area: monet;  }
+.field--years-slider { align-self: end; grid-area: yearsSL;}
+
+
+.filters .field{               /* optional, makes label + control stack cleanly */
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.field--monet .monet-inline label{
+  display: inline-flex;
+  align-items: center;
+ flex-wrap: wrap;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+/* tiny pill-style buttons */
+.btn.mini{
+  padding: 6px 10px;
+  font-size: .9rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #0f1420;
+}
+
+/* Allow grid children to actually shrink (prevents overflow) */
+.filters > * { min-width: 0; }
+.field       { min-width: 0; }
+.years-field { min-width: 0; }
+
+/* Make controls obey the grid column width instead of their intrinsic width */
+.field select,
+.field input[type="number"]{
+  width: 100%;
+  }
+/* Years block: align height with others */
+.years-field{
+  height: 24px;
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 4px;
+}
+
+/* Stack on narrow screens */
+@media (max-width: 720px){
+  .filters{
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "region"
+      "votes"
+      "sort"
+      "yearsIO"
+      "monet"
+      "yearsSL";
+  }
+}
+/* Inputs row stays normal */
+.year-io{
+  display: grid;
+  grid-template-columns: 1fr min-content 1fr;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.year-io .dash{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;                   /* space around the dash */
+  min-width: 5px;                   /* ensures a visible seam */
+}
+
+/* Base wrapper: MUST be positioned for absolute children */
+.range-wrap{
+  position: relative;
+  height: 24px;
+}
+
+/* Compact version inside the Years field */
+.range-wrap.in-field{
+  height: 20px;
+  margin-top: 4px;
+  overflow: visible;
+}
+
+/* Rails: hide on narrower desktops so they never collide with the panel */
+@media (max-width: 1200px){
+  .rail{ display:none; }
+}
+/* Track + fill */
+.range-track{
+  position: absolute;
+  left: calc(var(--thumbW) / 2);
+  right: calc(var(--thumbW) / 2);
+  top: 8px;                 /* centers the rail within 20–24px height */
+  height: 4px;
+  border-radius: 4px;
+  background: #1b2333;
+}
+.range-fill{
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 0;
+  background: #39ff14;
+  border-radius: 4px;
+}
+
+/* Narrow screens: single column, full-width Search */
+@media (max-width: 720px){
+  .filters{
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "region"
+      "votes"
+      "years"
+      "sort"
+      "search";
+  }
+  .search-field{ justify-self: stretch; }
+  .search-field .btn{ width: 100%; }
+}
+
+@media (max-width: 720px){
+  .filters{
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "region"
+      "votes"
+      "years"
+      "sort"
+      "search";
+  }
+  .search-field{ justify-self: stretch; }
+  .search-field .btn{ width: 100%; }
+}
+
+/* Stack on narrower screens */
+@media (max-width: 900px){
+  .subfilters{
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Keep the bulk buttons out of the scroller and to the right */
+.genres-head .genre-bulk{ margin-left:auto; }
+
+/* make sure the whole chain allows shrinking & stretches */
+.page, .main, .panel, .subfilters {
+  min-width: 0 !important;
+  width: 100% !important; /* safe for block-level containers */
+}
+
+/* the two grid children in .subfilters must be allowed to shrink */
+.subfilters > .providers-block,
+.subfilters > .genres-block {
+  min-width: 0 !important;
+}
+
+/* and the right column should actively claim its track width */
+.subfilters > .genres-block {
+  width: 100% !important;
+  justify-self: stretch !important;
+}
+
+
+  </style>
+</head>
+<body>
+
+  <div class="page">
+    <aside class="rail">[ Left Video Banner ]</aside>
+
+    <main class="main">
+      <div class="top-ad">[ Top Banner / Video Ad ]</div>
+
+      <header>
+        <h1>Movie Finder</h1>
+        <p class="sub">Filter by genre, year, streaming service, country, and monetization. (TMDB-only MVP)</p>
+      </header>
+
+      <!-- FILTER PANEL -->
+<section class="panel">
+
+<!-- TOP FILTER GRID -->
+<div class="filters">
+
+<!-- Region -->
+<div class="field field--region">
+  <label>Region</label>
+  <select id="region">
+    <option value="US">🇺🇸 US</option>
+    <option value="SE" selected>🇸🇪 SE</option>
+    <option value="GB">🇬🇧 GB</option>
+    <option value="CA">🇨🇦 CA</option>
+    <option value="AU">🇦🇺 AU</option>
+    <option value="DE">🇩🇪 DE</option>
+    <option value="FR">🇫🇷 FR</option>
+    <option value="ES">🇪🇸 ES</option>
+    <option value="IT">🇮🇹 IT</option>
+    <option value="NL">🇳🇱 NL</option>
+    <option value="NO">🇳🇴 NO</option>
+    <option value="DK">🇩🇰 DK</option>
+    <option value="FI">🇫🇮 FI</option>
+  </select>
+</div>
+
+  <!-- Min Votes -->
+  <div class="field field--votes">
+    <label>Min Votes</label>
+    <input id="minVotes" type="number" min="0" step="50" value="100" />
+  </div>
+
+    <!-- Sort -->
+  <div class="field sort-field">
+    <label>Sort</label>
+    <select id="sort">
+      <option value="tmdb_desc">TMDB Rating ↓</option>
+      <option value="tmdb_asc">TMDB Rating ↑</option>
+      <option value="pop_desc">Popularity ↓</option>
+      <option value="pop_asc">Popularity ↑</option>
+      <option value="votes_desc">Votes ↓</option>
+      <option value="votes_asc">Votes ↑</option>
+      <option value="year_desc">Year ↓</option>
+      <option value="year_asc">Year ↑</option>
+      <option value="title_asc">Title A–Z</option>
+      <option value="title_desc">Title Z–A</option>
+    </select>
+  </div>
+  
+
+<!-- Years (TOP ROW: numerals only) -->
+<div class="field field--years-io">
+  <label>Years</label>
+  <div class="year-io">
+    <input id="yearMinIO" type="number" min="1900" max="2025" value="2000">
+    <span class="dash">—</span>
+    <input id="yearMaxIO" type="number" min="1900" max="2025" value="2025">
+  </div>
+</div>
+<!-- ✅ ^ this field is now CLOSED -->
+
+<!-- SECOND ROW LEFT — Monetization -->
+<div class="field field--monet">
+  <label>Monetization</label>
+  <div class="monet-inline">
+    <label><input type="checkbox" name="mon" value="flatrate" checked> Subscription</label>
+    <label><input type="checkbox" name="mon" value="free"> Free</label>
+    <label><input type="checkbox" name="mon" value="ads"> Ads</label>
+    <label><input type="checkbox" name="mon" value="rent"> Rent</label>
+    <label><input type="checkbox" name="mon" value="buy"> Buy</label>
+  </div>
+</div>
+
+<!-- SECOND ROW RIGHT — Slider only -->
+<div class="field field--years-slider">
+  <div class="range-wrap in-field">
+    <div class="range-track" aria-hidden="true">
+      <div class="range-fill"></div>
+    </div>
+    <input id="yearMin" type="range" min="1900" max="2025" value="2000" step="1">
+    <input id="yearMax" type="range" min="1900" max="2025" value="2025" step="1">
+  </div>
+</div>
+
+
+  </div> <!-- ✅ CLOSE .filters here -->
+
+<!-- END TOP FILTER GRID -->
+
+  <!-- SUBFILTERS -->
+<div class="subfilters">
+  <!-- LEFT -->
+  <section class="providers-block">
+    <h3>Streaming Services (by region)</h3>
+    <div id="providers" class="providers-box">Loading…</div>
+    <div class="provider-actions">
+  <button id="providersAll" class="btn mini">Enable all</button>
+  <button id="providersNone" class="btn mini">Clear all</button>
+</div>
+
+  </section>
+
+  <section class="genres-block">
+  <div class="genres-head">
+    <h3>Genres</h3>
+  </div>
+
+  <div class="genres-box">
+    <div id="genres">Loading…</div>
+  </div>
+
+  <!-- keep bulk buttons + erotic together under the box -->
+  <div class="genre-actions">
+    <button id="genresAll" class="btn mini">Enable all</button>
+    <button id="genresNone" class="btn mini">Clear all</button>
+    <label class="erotic-tog compact" style="margin-left:8px;">
+      <input type="checkbox" id="eroticToggle"> Erotic
+    </label>
+  </div>
+</section>
+
+</div> <!-- ✅ close .subfilters here -->
+
+<div class="subfilters-actions">
+  <div class="search-row">
+    <button id="searchBtn" class="btn btn-primary btn-xl">Search</button>
+  </div>
+</div>
+
+</section>
+<!-- END PANEL -->
+
+<!-- RESULTS -->
+<section class="results">
+  <h2>Results</h2>
+  <div id="results" class="grid"></div>
+
+  <div id="loadMoreWrap" style="text-align:center; margin-top:16px; display:none;">
+    <button id="loadMoreBtn" class="btn btn-primary">Load more</button>
+  </div>
+
+  <div class="ads" style="margin-top:12px;">[ In-Feed Ad #2 ]</div>
+</section>
+
+
+
+      <div class="ads">[ In-Feed Ad ]</div>
+
+    </main>
+
+    <aside class="rail">[ Right Video Banner ]</aside>
+  </div>
+
+  <!-- Modal container (place this ABOVE the <script>) -->
+<div id="synopsisModal" class="modal-overlay">
+  <div class="modal">
+    <span class="close-btn" id="closeModal">&times;</span>
+    <h3 id="modalTitle"></h3>
+    <p id="modalContent"></p>
+  </div>
+</div>
+
+<script>
+function paintYearTrack(){
+  const minEl = document.getElementById('yearMin');
+  const maxEl = document.getElementById('yearMax');
+  const track = document.querySelector('.range-track');
+  const fill  = document.querySelector('.range-fill');
+  if(!minEl || !maxEl || !track || !fill) return;
+
+  const lo = Math.min(+minEl.value, +maxEl.value);
+  const hi = Math.max(+minEl.value, +maxEl.value);
+  const minY = +minEl.min || 1900;
+  const maxY = +minEl.max || new Date().getFullYear();
+
+  const w = track.clientWidth;
+  const aPx = ((lo - minY) / (maxY - minY)) * w;
+  const bPx = ((hi - minY) / (maxY - minY)) * w;
+
+  fill.style.left  = `${aPx}px`;
+  fill.style.width = `${Math.max(0, bPx - aPx)}px`;
+
+  // keep the dragged thumb on top when crossing
+  minEl.style.zIndex = (minEl.value > maxEl.value) ? 6 : 5;
+  maxEl.style.zIndex = (minEl.value > maxEl.value) ? 5 : 6;
+}
+
+
+function syncYearRange(){
+  const minEl = document.getElementById('yearMin');
+  const maxEl = document.getElementById('yearMax');
+  const minIO = document.getElementById('yearMinIO');
+  const maxIO = document.getElementById('yearMaxIO');
+  if(!minEl || !maxEl || !minIO || !maxIO) return;
+
+  let a = +minEl.value, b = +maxEl.value;
+  if(a > b) [a, b] = [b, a];
+  minEl.value = a; maxEl.value = b;
+  minIO.value = a; maxIO.value = b;
+
+  paintYearTrack();
+}
+
+function clamp(v, lo, hi){ return Math.min(hi, Math.max(lo, v)); }
+
+function initYearSlider(defaultStart=2000){
+  const minEl = document.getElementById('yearMin');
+  const maxEl = document.getElementById('yearMax');
+  const minIO = document.getElementById('yearMinIO');
+  const maxIO = document.getElementById('yearMaxIO');
+  if(!minEl || !maxEl || !minIO || !maxIO) return;
+
+  const now = new Date().getFullYear();
+  [minEl, maxEl, minIO, maxIO].forEach(el => {
+    el.min = '1900'; el.max = String(now);
+  });
+
+  minEl.value ||= String(defaultStart);
+  maxEl.value ||= String(now);
+  minIO.value = minEl.value;
+  maxIO.value = maxEl.value;
+
+  // sliders -> inputs
+  minEl.addEventListener('input', syncYearRange);
+  maxEl.addEventListener('input', syncYearRange);
+
+  // inputs -> slider (with clamping)
+  minIO.addEventListener('input', () => {
+    minEl.value = clamp(+minIO.value, +minEl.min, +minEl.max);
+    syncYearRange();
+  });
+  maxIO.addEventListener('input', () => {
+    maxEl.value = clamp(+maxIO.value, +maxEl.min, +maxEl.max);
+    syncYearRange();
+  });
+
+  syncYearRange();
+}
+</script>
+
+
+
+<script>
+/* ------------------ CONFIG/STATE ------------------ */
+const API = '/api';
+let currentPage = 1;
+let lastParams = null;
+const seenIds = new Set();   // avoid duplicate cards across pages
+
+// NEW: cache providers per region + remember selections per region
+const providerCache = new Map();         // region -> [{id,name, ...}]
+const providerSelections = new Map();    // region -> Set(providerId)
+let currentRegion = null;
+
+// tiny debounce helper so rapid region changes don't spam
+const debounce = (fn, ms = 200) => {
+  let t;
+  return (...args) => {
+    clearTimeout(t);
+    t = setTimeout(() => fn(...args), ms);
+  };
+};
+
+// read currently checked provider IDs from the DOM
+function getSelectedProviderIds() {
+  return [...document.querySelectorAll('#providers input[name="provider"]:checked')]
+    .map(x => x.value);
+}
+
+
+/* ------------------ LOADERS ------------------ */
+function setAllGenres(checked){
+  document.querySelectorAll('#genres input[name="genre"]').forEach(cb => cb.checked = checked);
+}
+
+async function loadGenres(){
+  const box = document.getElementById('genres');
+  if (!box) return;
+  box.textContent = 'Loading…';
+  try{
+    const r = await fetch(`${API}/genres`);
+    const data = await r.json();
+    const displayMap = { 'Science Fiction': 'Sci-Fi' }; // note the non-breaking hyphen
+    if (!Array.isArray(data) || !data.length){
+      box.textContent = 'No genres available.';
+      return;
+    }
+    box.innerHTML = '';
+    data.forEach(g=>{
+      const lbl = document.createElement('label');
+      lbl.style.display = 'inline-flex';
+      lbl.style.alignItems = 'center';
+      lbl.style.gap = '6px';
+      lbl.style.margin = '4px 8px';
+      const display = displayMap[g.name?.trim?.()] || g.name;
+lbl.innerHTML = `<input type="checkbox" name="genre" value="${g.id}"> ${display}`;
+      box.appendChild(lbl);
+    });
+
+    // bulk buttons (wire once)
+    const allBtn  = document.getElementById('genresAll');
+    const noneBtn = document.getElementById('genresNone');
+    if (allBtn && !allBtn.dataset.wired){
+      allBtn.dataset.wired = '1';
+      allBtn.addEventListener('click', (e)=>{ e.preventDefault(); setAllGenres(true); search(); });
+    }
+    if (noneBtn && !noneBtn.dataset.wired){
+      noneBtn.dataset.wired = '1';
+      noneBtn.addEventListener('click', (e)=>{ e.preventDefault(); setAllGenres(false); search(); });
+    }
+    const erotic = document.getElementById('eroticToggle');
+    if (erotic && !erotic.dataset.wired){
+      erotic.dataset.wired = '1';
+      erotic.addEventListener('change', ()=> search());
+    }
+  }catch(e){
+    console.error(e);
+    box.textContent = 'Failed to load genres.';
+  }
+}
+
+function setAllProviders(checked){
+  const inputs = document.querySelectorAll('#providers input[name="provider"]');
+  inputs.forEach(cb => cb.checked = checked);
+
+  // keep the per-region memory in sync
+  if (currentRegion){
+    const set = providerSelections.get(currentRegion) || new Set();
+    set.clear();
+    if (checked) inputs.forEach(cb => set.add(cb.value));
+    providerSelections.set(currentRegion, set);
+  }
+}
+
+
+async function loadProviders(regionOverride) {
+  const box = document.getElementById('providers');
+  const regionEl = document.getElementById('region');
+  if (!box || !regionEl) return;
+
+  const region = (regionOverride || regionEl.value || '').toUpperCase();
+  if (!region) return;
+
+  // 1) Save current region’s selections (before we swap lists)
+  if (currentRegion) {
+    const sel = new Set(getSelectedProviderIds());
+    providerSelections.set(currentRegion, sel);
+  }
+
+  // 2) Use cache if available; otherwise fetch & cache
+  let list = providerCache.get(region);
+  if (!list) {
+    box.textContent = 'Loading…';
+    try {
+      const r = await fetch(`${API}/providers?region=${encodeURIComponent(region)}`);
+      const data = await r.json();
+      list = Array.isArray(data) ? data : [];
+      // Sort by priority if provided, else A→Z
+      list.sort((a, b) => {
+        const pa = (a.priority ?? 9999), pb = (b.priority ?? 9999);
+        if (pa !== pb) return pa - pb;
+        return String(a.name || '').localeCompare(String(b.name || ''));
+      });
+      providerCache.set(region, list);
+    } catch (e) {
+      console.error(e);
+      box.textContent = 'Failed to load providers.';
+      return;
+    }
+  }
+
+  // 3) Render checkboxes for this region
+  box.innerHTML = '';
+  if (!list.length) {
+    box.innerHTML = `<em>No providers for ${region}.</em>`;
+  } else {
+    const frag = document.createDocumentFragment();
+    list.forEach(p => {
+      const lbl = document.createElement('label');
+      lbl.style.display = 'block';
+      lbl.innerHTML = `<input type="checkbox" name="provider" value="${p.id}"> ${p.name || ('Provider #'+p.id)}`;
+      frag.appendChild(lbl);
+    });
+    box.appendChild(frag);
+    // wire bulk buttons once
+const allBtn  = document.getElementById('providersAll');
+const noneBtn = document.getElementById('providersNone');
+
+if (allBtn && !allBtn.dataset.wired){
+  allBtn.dataset.wired = '1';
+  allBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    setAllProviders(true);
+    search();
+  });
+}
+
+if (noneBtn && !noneBtn.dataset.wired){
+  noneBtn.dataset.wired = '1';
+  noneBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    setAllProviders(false);
+    search();
+  });
+}
+
+  }
+
+  // 4) Restore any previously saved selections for this region
+  const saved = providerSelections.get(region);
+  if (saved && saved.size) {
+    [...box.querySelectorAll('input[name="provider"]')].forEach(cb => {
+      if (saved.has(cb.value)) cb.checked = true;
+    });
+  }
+
+  // 5) Keep selections up to date as user checks/unchecks
+  box.onchange = (e) => {
+    if (e.target?.name === 'provider') {
+      const set = providerSelections.get(region) || new Set();
+      if (e.target.checked) set.add(e.target.value);
+      else set.delete(e.target.value);
+      providerSelections.set(region, set);
+    }
+  };
+
+  // 6) Remember which region is “current”
+  currentRegion = region;
+}
+
+
+/* ------------------ RENDER ------------------ */
+// Build a compact "Included on: Netflix, ..." line from server availability
+function availabilityMarkup(movie, selectedTypes = []) {
+  const a = movie?.availability;
+  if (!a) return '';
+
+  // If user picked specific types, prefer those; else prefer flatrate, then free/ads.
+  const prefOrder = selectedTypes.length
+    ? selectedTypes
+    : ['flatrate', 'free', 'ads'];
+
+  let pickedType = null;
+  for (const t of prefOrder) {
+    if (Array.isArray(a[t]) && a[t].length) { pickedType = t; break; }
+  }
+  if (!pickedType) return '';
+
+  const names = a[pickedType].map(x => x.name).filter(Boolean);
+  if (!names.length) return '';
+
+  const label = (
+    pickedType === 'flatrate' ? 'Included on' :
+    pickedType === 'free'     ? 'Free on'     :
+    pickedType === 'ads'      ? 'With ads on' :
+    pickedType === 'rent'     ? 'Rent on'     :
+                                'Buy on'
+  );
+
+  // show up to 3 provider names
+  const shown = names.slice(0, 3).join(', ');
+  const more  = names.length > 3 ? ` +${names.length - 3}` : '';
+
+  return `<div class="meta"><small>${label}: ${shown}${more}</small></div>`;
+}
+
+function renderResults(items = [], { append = true } = {}) {
+  const out = document.getElementById('results');
+  if (!out) return;
+
+  if (!append) {
+    out.innerHTML = '';
+    seenIds.clear();
+  }
+
+  // read currently selected monetization types from lastParams (comma list)
+  const selectedTypes = (lastParams?.get('monetization') || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  (items || []).forEach(m => {
+    if (!m || seenIds.has(m.id)) return;
+    seenIds.add(m.id);
+
+    const posterUrl = m.poster || (m.poster_path ? `https://image.tmdb.org/t/p/w342${m.poster_path}` : '');
+    const year   = m.year ?? (m.release_date ? m.release_date.slice(0, 4) : '—');
+    const rating = m.tmdb_vote ?? m.vote_average ?? '—';
+    const votes  = m.tmdb_count ?? m.vote_count ?? '—';
+
+    const availHtml = availabilityMarkup(m, selectedTypes);
+
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <img src="${posterUrl}" alt="${m.title || ''}" onerror="this.style.display='none'"/>
+      <div class="title"><strong>${m.title || ''}</strong></div>
+      <div class="meta"><small>Year: ${year}${m.adult ? ' · <span class=\'badge-erotic\'>Erotic</span>' : ''}</small></div>
+      <div class="meta"><small>TMDB: <strong style="color:#39ff14">${rating}</strong></small></div>
+      <div class="meta"><small>Votes: ${votes}</small></div>
+      ${availHtml}
+      <div class="btn-row" style="justify-content:center;">
+        <div class="btn-group">
+          <button class="btn-ghost synopsis-btn btn--syn"
+                  data-title="${(m.title || '').replace(/"/g,'&quot;')}"
+                  data-synopsis="${encodeURIComponent(m.overview || 'No synopsis available.')}">
+            Synopsis
+          </button>
+          <button class="btn-ghost trailer-btn btn--trailer"
+                  data-id="${m.id}"
+                  data-title="${(m.title || '').replace(/"/g,'&quot;')}">
+            Trailer
+          </button>
+        </div>
+      </div>
+    `;
+    out.appendChild(card);
+  });
+}
+
+
+function toggleLoadMore(page, totalPages){
+  const wrap = document.getElementById('loadMoreWrap');
+  if (!wrap) return;
+  wrap.style.display = (page < totalPages) ? 'block' : 'none';
+}
+
+/* ------------------ SEARCH + PAGINATION ------------------ */
+async function search(){
+  currentPage = 1;
+  seenIds.clear();
+
+  const region = document.getElementById('region').value.toUpperCase();
+  const yearFrom = document.getElementById('yearMin').value;
+  const yearTo   = document.getElementById('yearMax').value;
+  const genres   = [...document.querySelectorAll('input[name="genre"]:checked')].map(x=>x.value).join('|');
+  const services = [...document.querySelectorAll('input[name="provider"]:checked')].map(x=>x.value).join(',');
+  const monetization = [...document.querySelectorAll('input[name="mon"]:checked')].map(x=>x.value).join(',');
+  const sort     = document.getElementById('sort').value;
+  const minVotes = document.getElementById('minVotes')?.value || '';
+  const erotic   = document.getElementById('eroticToggle')?.checked ? '1' : '0';
+
+  lastParams = new URLSearchParams({ region, yearFrom, yearTo, genres, services, monetization, sort, minVotes, erotic });
+
+  const p = new URLSearchParams(lastParams);
+  p.set('page', '1');
+
+  const r = await fetch(`${API}/search?${p.toString()}`);
+  const data = await r.json();
+  renderResults(data.results, { append: false });   // replace grid with fresh results
+  toggleLoadMore(data.page, data.total_pages);
+}
+
+document.getElementById('loadMoreBtn')?.addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true; btn.textContent = 'Loading…';
+
+  currentPage += 1;
+  const p = new URLSearchParams(lastParams);
+  p.set('page', String(currentPage));
+
+  const r = await fetch(`${API}/search?${p.toString()}`);
+  const data = await r.json();
+
+  renderResults(data.results, { append: true });
+  toggleLoadMore(data.page, data.total_pages);
+
+  btn.disabled = false; btn.textContent = 'Load more';
+});
+
+/* ------------------ MODAL (Synopsis / Trailer) ------------------ */
+const modal = document.getElementById('synopsisModal');
+const modalTitle = document.getElementById('modalTitle');
+const modalContent = document.getElementById('modalContent');
+const closeModalBtn = document.getElementById('closeModal');
+
+document.addEventListener('click', async (e) => {
+  if (e.target.classList.contains('synopsis-btn')) {
+    const title = e.target.getAttribute('data-title') || 'Synopsis';
+    const synopsis = decodeURIComponent(e.target.getAttribute('data-synopsis') || '');
+    modalTitle.textContent = title;
+    modalContent.textContent = synopsis || 'No synopsis available.';
+    modal.style.display = 'flex';
+    return;
+  }
+  if (e.target.classList.contains('trailer-btn')) {
+    const id = e.target.getAttribute('data-id');
+    const title = e.target.getAttribute('data-title') || 'Trailer';
+    try {
+      const r = await fetch(`${API}/videos/${encodeURIComponent(id)}`);
+      const data = await r.json();
+      if (!data || !data.key) {
+        modalTitle.textContent = title;
+        modalContent.textContent = 'No trailer found.';
+        modal.style.display = 'flex';
+        return;
+      }
+      const embed = `https://www.youtube.com/embed/${data.key}?rel=0&modestbranding=1`;
+      modalTitle.textContent = `${title} — Trailer`;
+      modalContent.innerHTML = `
+        <div class="video-wrap">
+          <iframe src="${embed}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+        </div>`;
+      modal.style.display = 'flex';
+    } catch (err) {
+      modalTitle.textContent = title;
+      modalContent.textContent = 'Error loading trailer.';
+      modal.style.display = 'flex';
+    }
+  }
+});
+function closeModal() {
+  modal.style.display = 'none';
+  modalContent.innerHTML = '';
+}
+closeModalBtn.addEventListener('click', closeModal);
+modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal.style.display === 'flex') closeModal(); });
+
+/* ------------------ INIT ------------------ */
+document.addEventListener('DOMContentLoaded', () => {
+  initYearSlider(2000);
+  loadGenres();
+
+  
+  currentRegion = document.getElementById('region')?.value?.toUpperCase() || null;
+  loadProviders(currentRegion);
+  
+
+  const debouncedLoadProviders = debounce(loadProviders, 200);
+  document.getElementById('region')?.addEventListener('change', () => {
+    debouncedLoadProviders();
+  });
+  
+  
+
+  document.getElementById('searchBtn')?.addEventListener('click', search);
+});
+
+
+  window.addEventListener('load', paintYearTrack);
+  window.addEventListener('resize', paintYearTrack);
+
+
+</script>
+
+</body>
+</html>
